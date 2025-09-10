@@ -40,91 +40,60 @@ def get_sure_meaning(sure_name: str) -> dict:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-        # Sure adlarını ve linklerini bul
-        sure_link = None
+        
+        # Sure adlarını ve bilgilerini sadece bu sayfadan al
+        sure_found = False
+        sure_details = {
+            "sure_adi": sure_name,
+            "kaynak_url": url
+        }
+        
+        # Sayfadaki tüm linkleri ve metinleri tara
         for a in soup.find_all("a", href=True):
             text = a.get_text(strip=True)
             if text.lower() == sure_name.lower() or text.lower() == sure_name.lower().replace(" suresi",""):
-                sure_link = a["href"]
+                sure_found = True
+                sure_details["sure_linki"] = a["href"]
+                
+                # Aynı satırdaki bilgileri al (numarası, ayet sayısı vs.)
+                parent = a.parent
+                if parent:
+                    parent_text = parent.get_text(strip=True)
+                    
+                    # Sure numarası ve ayet sayısı çıkar
+                    import re
+                    # Örnek: "1 Fâtiha 7 Ayet" veya "2 Bakara 286 Ayet"
+                    match = re.search(r'(\d+)\s*' + re.escape(text) + r'\s*(\d+)\s*Ayet', parent_text, re.IGNORECASE)
+                    if match:
+                        sure_details["sure_numarasi"] = int(match.group(1))
+                        sure_details["ayet_sayisi"] = int(match.group(2))
+                
+                # Çevre metinden ek bilgi al
+                siblings = parent.find_next_siblings() if parent else []
+                for sibling in siblings[:3]:  # Yakındaki 3 elementi kontrol et
+                    sibling_text = sibling.get_text(strip=True) if hasattr(sibling, 'get_text') else str(sibling).strip()
+                    if sibling_text and len(sibling_text) > 10:
+                        if "Mekkî" in sibling_text or "Medenî" in sibling_text:
+                            sure_details["iniş_yeri"] = "Mekke" if "Mekkî" in sibling_text else "Medine"
+                        if len(sibling_text) > 50:  # Uzun metin açıklama olabilir
+                            sure_details["aciklama"] = sibling_text[:200] + "..." if len(sibling_text) > 200 else sibling_text
+                
                 break
-        if not sure_link:
-            result["error"] = f"'{sure_name}' adlı sure bulunamadı veya sayfa yapısı değişmiş olabilir."
+        
+        if not sure_found:
+            result["error"] = f"'{sure_name}' adlı sure bulunamadı."
             return result
-        # Sure detay sayfasına git
-        sure_url = sure_link if sure_link.startswith("http") else f"https://www.kuranokuyan.com{sure_link}"
-        sure_resp = requests.get(sure_url, timeout=10)
-        sure_resp.raise_for_status()
-        sure_soup = BeautifulSoup(sure_resp.text, "html.parser")
-        
-        # Sure detaylı bilgilerini çıkar
-        sure_details = {
-            "sure_adi": sure_name,
-            "sure_url": sure_url
-        }
-        
-        # Sure numarasını ve ayet sayısını bul
-        title = sure_soup.find("title")
-        if title:
-            title_text = title.get_text()
-            # Örnek: "1. Fatiha Suresi - 7 Ayet"
-            import re
-            match = re.search(r'(\d+)\.\s*(.+?)\s*-\s*(\d+)\s*Ayet', title_text)
-            if match:
-                sure_details["sure_numarasi"] = int(match.group(1))
-                sure_details["ayet_sayisi"] = int(match.group(3))
-        
-        # Anlamı ve açıklamayı bul
-        meaning = None
-        description = None
-        
-        # Ana içerik alanını bul
-        content_divs = sure_soup.find_all("div", class_=True)
-        for div in content_divs:
-            classes = div.get("class", [])
-            text = div.get_text(strip=True)
             
-            # Anlam alanını bul
-            if any("meal" in c.lower() or "meaning" in c.lower() for c in classes):
-                if len(text) > 20:  # Anlam genellikle uzun metindir
-                    meaning = text
-            
-            # Açıklama alanını bul  
-            if any("aciklama" in c.lower() or "description" in c.lower() or "tanitim" in c.lower() for c in classes):
-                if len(text) > 20:
-                    description = text
-        
-        # Alternatif: paragraflardan anlam bul
-        if not meaning:
-            paragraphs = sure_soup.find_all("p")
+        # Sayfa içindeki genel açıklamalardan sure ile ilgili bilgi bul
+        all_text = soup.get_text()
+        if sure_name.lower() in all_text.lower():
+            # Sure adının geçtiği paragrafları bul
+            paragraphs = soup.find_all("p")
             for p in paragraphs:
-                text = p.get_text(strip=True)
-                if len(text) > 50:  # Uzun paragraf anlam olabilir
-                    meaning = text
+                p_text = p.get_text(strip=True)
+                if sure_name.lower() in p_text.lower() and len(p_text) > 30:
+                    sure_details["sayfa_aciklamasi"] = p_text
                     break
-        
-        # Meta bilgileri bul (mekan, dönem vs.)
-        meta_info = {}
-        info_divs = sure_soup.find_all("div")
-        for div in info_divs:
-            text = div.get_text(strip=True)
-            if "Mekkî" in text or "Medenî" in text:
-                meta_info["iniş_yeri"] = "Mekke" if "Mekkî" in text else "Medine"
-            if "iniş sırası" in text.lower():
-                import re
-                order_match = re.search(r'(\d+)', text)
-                if order_match:
-                    meta_info["iniş_sirasi"] = int(order_match.group(1))
-        
-        sure_details.update(meta_info)
-        
-        if meaning:
-            sure_details["anlam"] = meaning
-        if description:
-            sure_details["aciklama"] = description
-            
-        if not meaning and not description:
-            result["error"] = f"'{sure_name}' için detaylı bilgiler bulunamadı. Sayfa yapısı değişmiş olabilir."
-            return result
             
         result["success"] = True
         result["data"] = sure_details

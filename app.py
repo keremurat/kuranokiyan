@@ -40,26 +40,35 @@ def get_sure_meaning(sure_name: str) -> dict:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-        # Sure listesi tablosunu bul
-        table = soup.find("table")
-        if not table:
-            result["error"] = "Sure listesi bulunamadı."
-            return result
-        rows = table.find_all("tr")
-        found = None
-        for row in rows:
-            cols = row.find_all("td")
-            if len(cols) < 2:
-                continue
-            name = cols[1].get_text(strip=True)
-            if name.lower() == sure_name.lower():
-                found = row
+        # Sure adlarını ve linklerini bul
+        sure_link = None
+        for a in soup.find_all("a", href=True):
+            text = a.get_text(strip=True)
+            if text.lower() == sure_name.lower() or text.lower() == sure_name.lower().replace(" suresi",""):
+                sure_link = a["href"]
                 break
-        if not found:
-            result["error"] = f"'{sure_name}' adlı sure bulunamadı."
+        if not sure_link:
+            result["error"] = f"'{sure_name}' adlı sure bulunamadı veya sayfa yapısı değişmiş olabilir."
             return result
-        # Anlam sütunu genellikle son sütun
-        meaning = found.find_all("td")[-1].get_text(strip=True)
+        # Sure detay sayfasına git
+        sure_url = sure_link if sure_link.startswith("http") else f"https://www.kuranokuyan.com{sure_link}"
+        sure_resp = requests.get(sure_url, timeout=10)
+        sure_resp.raise_for_status()
+        sure_soup = BeautifulSoup(sure_resp.text, "html.parser")
+        # Anlamı bul (örnek: .meal veya .sure-meal gibi bir class olabilir)
+        meaning = None
+        for div in sure_soup.find_all("div"):
+            if div.get("class") and any("meal" in c for c in div.get("class")):
+                meaning = div.get_text(strip=True)
+                break
+        if not meaning:
+            # Alternatif: ilk paragraf veya metin
+            p = sure_soup.find("p")
+            if p:
+                meaning = p.get_text(strip=True)
+        if not meaning:
+            result["error"] = f"'{sure_name}' anlamı ilgili sayfada bulunamadı. Sayfa yapısı değişmiş olabilir."
+            return result
         result["success"] = True
         result["data"] = {
             "sure": sure_name,
@@ -67,5 +76,5 @@ def get_sure_meaning(sure_name: str) -> dict:
         }
         return result
     except Exception as e:
-        result["error"] = str(e)
+        result["error"] = f"Web isteği veya parsing hatası: {str(e)}"
         return result

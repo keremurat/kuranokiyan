@@ -132,3 +132,122 @@ def get_sure_meaning(sure_name: str) -> dict:
     except Exception as e:
         result["error"] = f"Web isteği veya parsing hatası: {str(e)}"
         return result
+
+
+@lru_cache(maxsize=128)
+def kuran_arastirma_yap(soru: str) -> dict:
+    """
+    Kuran ile ilgili genel soruları araştırır ve yanıtlar.
+    
+    Args:
+        soru (str): Kullanıcının sorduğu genel soru (ör: "Kuranda hangi peygamberler var?")
+    Returns:
+        dict: {success, data, error, timestamp}
+    Raises:
+        None (hatalar response içinde döner)
+    """
+    result = {
+        "success": False,
+        "data": None,
+        "error": None,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    if not soru or not isinstance(soru, str):
+        result["error"] = "Geçersiz soru. Lütfen bir soru girin."
+        return result
+    
+    try:
+        # Sure listesi sayfasından başlangıç bilgileri al
+        base_url = "https://www.kuranokuyan.com"
+        sure_listesi_url = f"{base_url}/sure-listesi"
+        
+        resp = requests.get(sure_listesi_url, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        
+        # Tüm sure linklerini topla
+        sure_links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            text = a.get_text(strip=True)
+            if "suresi" in href.lower() or any(c.isdigit() for c in href):
+                full_url = href if href.startswith("http") else f"{base_url}{href}"
+                sure_links.append({"url": full_url, "sure_adi": text})
+        
+        # Arama stratejisi: soru tipine göre
+        soru_lower = soru.lower()
+        arama_sonuclari = []
+        
+        # Peygamber araması
+        if "peygamber" in soru_lower or "nebî" in soru_lower or "resul" in soru_lower:
+            peygamber_isimleri = ["musa", "ibrahim", "nuh", "isa", "yusuf", "davud", "süleyman", "yakub", "ishak", "ismail", "harun", "zekeriya", "yahya", "ilyas", "elyesa", "yunus", "lut", "salih", "hud", "şuayb", "eyyub", "zülkifl", "idris", "adem"]
+            
+            for i, sure_link in enumerate(sure_links[:10]):  # İlk 10 sureyi kontrol et
+                try:
+                    sure_resp = requests.get(sure_link["url"], timeout=10)
+                    sure_resp.raise_for_status()
+                    sure_soup = BeautifulSoup(sure_resp.text, "html.parser")
+                    sure_text = sure_soup.get_text().lower()
+                    
+                    bulunan_peygamberler = []
+                    for peygamber in peygamber_isimleri:
+                        if peygamber in sure_text:
+                            bulunan_peygamberler.append(peygamber.title())
+                    
+                    if bulunan_peygamberler:
+                        arama_sonuclari.append({
+                            "sure": sure_link["sure_adi"],
+                            "bulunan": bulunan_peygamberler,
+                            "url": sure_link["url"]
+                        })
+                except:
+                    continue
+        
+        # Kelime araması (genel)
+        elif any(word in soru_lower for word in ["hangi", "nerede", "kaç", "kim"]):
+            # Soru içindeki anahtar kelimeleri çıkar
+            anahtar_kelimeler = []
+            import re
+            kelimeler = re.findall(r'\b\w+\b', soru_lower)
+            for kelime in kelimeler:
+                if len(kelime) > 3 and kelime not in ["hangi", "nerede", "kaçtır", "kadar", "surelerde", "suresi", "kuranda"]:
+                    anahtar_kelimeler.append(kelime)
+            
+            if anahtar_kelimeler:
+                for i, sure_link in enumerate(sure_links[:8]):  # İlk 8 sureyi kontrol et
+                    try:
+                        sure_resp = requests.get(sure_link["url"], timeout=10)
+                        sure_resp.raise_for_status()
+                        sure_soup = BeautifulSoup(sure_resp.text, "html.parser")
+                        sure_text = sure_soup.get_text().lower()
+                        
+                        bulunan_kelimeler = []
+                        for kelime in anahtar_kelimeler:
+                            if kelime in sure_text:
+                                bulunan_kelimeler.append(kelime)
+                        
+                        if bulunan_kelimeler:
+                            arama_sonuclari.append({
+                                "sure": sure_link["sure_adi"],
+                                "bulunan_kelimeler": bulunan_kelimeler,
+                                "url": sure_link["url"]
+                            })
+                    except:
+                        continue
+        
+        if not arama_sonuclari:
+            result["error"] = f"'{soru}' ile ilgili sonuç bulunamadı. Farklı kelimeler deneyebilirsiniz."
+            return result
+        
+        result["success"] = True
+        result["data"] = {
+            "soru": soru,
+            "bulunan_sonuc_sayisi": len(arama_sonuclari),
+            "sonuclar": arama_sonuclari
+        }
+        return result
+        
+    except Exception as e:
+        result["error"] = f"Araştırma hatası: {str(e)}"
+        return result

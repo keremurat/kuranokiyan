@@ -17,7 +17,7 @@ def dummyTool(param: str) -> str:
 @lru_cache(maxsize=128)
 def get_sure_meaning(sure_name: str) -> dict:
     """
-    Kuran'daki bir surenin anlamını webden çeker.
+    Kuran'daki bir surenin detaylı bilgilerini webden çeker.
 
     Args:
         sure_name (str): Sorgulanan sure adı (ör: 'Fatiha')
@@ -55,25 +55,79 @@ def get_sure_meaning(sure_name: str) -> dict:
         sure_resp = requests.get(sure_url, timeout=10)
         sure_resp.raise_for_status()
         sure_soup = BeautifulSoup(sure_resp.text, "html.parser")
-        # Anlamı bul (örnek: .meal veya .sure-meal gibi bir class olabilir)
-        meaning = None
-        for div in sure_soup.find_all("div"):
-            if div.get("class") and any("meal" in c for c in div.get("class")):
-                meaning = div.get_text(strip=True)
-                break
-        if not meaning:
-            # Alternatif: ilk paragraf veya metin
-            p = sure_soup.find("p")
-            if p:
-                meaning = p.get_text(strip=True)
-        if not meaning:
-            result["error"] = f"'{sure_name}' anlamı ilgili sayfada bulunamadı. Sayfa yapısı değişmiş olabilir."
-            return result
-        result["success"] = True
-        result["data"] = {
-            "sure": sure_name,
-            "meaning": meaning
+        
+        # Sure detaylı bilgilerini çıkar
+        sure_details = {
+            "sure_adi": sure_name,
+            "sure_url": sure_url
         }
+        
+        # Sure numarasını ve ayet sayısını bul
+        title = sure_soup.find("title")
+        if title:
+            title_text = title.get_text()
+            # Örnek: "1. Fatiha Suresi - 7 Ayet"
+            import re
+            match = re.search(r'(\d+)\.\s*(.+?)\s*-\s*(\d+)\s*Ayet', title_text)
+            if match:
+                sure_details["sure_numarasi"] = int(match.group(1))
+                sure_details["ayet_sayisi"] = int(match.group(3))
+        
+        # Anlamı ve açıklamayı bul
+        meaning = None
+        description = None
+        
+        # Ana içerik alanını bul
+        content_divs = sure_soup.find_all("div", class_=True)
+        for div in content_divs:
+            classes = div.get("class", [])
+            text = div.get_text(strip=True)
+            
+            # Anlam alanını bul
+            if any("meal" in c.lower() or "meaning" in c.lower() for c in classes):
+                if len(text) > 20:  # Anlam genellikle uzun metindir
+                    meaning = text
+            
+            # Açıklama alanını bul  
+            if any("aciklama" in c.lower() or "description" in c.lower() or "tanitim" in c.lower() for c in classes):
+                if len(text) > 20:
+                    description = text
+        
+        # Alternatif: paragraflardan anlam bul
+        if not meaning:
+            paragraphs = sure_soup.find_all("p")
+            for p in paragraphs:
+                text = p.get_text(strip=True)
+                if len(text) > 50:  # Uzun paragraf anlam olabilir
+                    meaning = text
+                    break
+        
+        # Meta bilgileri bul (mekan, dönem vs.)
+        meta_info = {}
+        info_divs = sure_soup.find_all("div")
+        for div in info_divs:
+            text = div.get_text(strip=True)
+            if "Mekkî" in text or "Medenî" in text:
+                meta_info["iniş_yeri"] = "Mekke" if "Mekkî" in text else "Medine"
+            if "iniş sırası" in text.lower():
+                import re
+                order_match = re.search(r'(\d+)', text)
+                if order_match:
+                    meta_info["iniş_sirasi"] = int(order_match.group(1))
+        
+        sure_details.update(meta_info)
+        
+        if meaning:
+            sure_details["anlam"] = meaning
+        if description:
+            sure_details["aciklama"] = description
+            
+        if not meaning and not description:
+            result["error"] = f"'{sure_name}' için detaylı bilgiler bulunamadı. Sayfa yapısı değişmiş olabilir."
+            return result
+            
+        result["success"] = True
+        result["data"] = sure_details
         return result
     except Exception as e:
         result["error"] = f"Web isteği veya parsing hatası: {str(e)}"

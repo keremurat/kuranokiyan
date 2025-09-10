@@ -24,11 +24,11 @@ async def dummy_tool(param: str) -> str:
 @mcp.tool()
 async def sure_anlami(sure_adi: str) -> str:
     """
-    Girilen sure adının anlamını döner.
+    Girilen sure adının detaylı bilgilerini döner (anlam, ayet sayısı, iniş yeri, vb.).
     Args:
         sure_adi (str): Sure adı (ör: 'Fatiha')
     Returns:
-        str: JSON formatında anlam veya hata
+        str: JSON formatında detaylı sure bilgileri veya hata
     """
     try:
         result = get_sure_meaning(sure_adi)

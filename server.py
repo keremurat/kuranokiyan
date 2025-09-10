@@ -1,6 +1,10 @@
 from mcp.server.fastmcp import FastMCP
 from app import dummyTool
 
+import json
+from app import get_sure_meaning
+from datetime import datetime
+
 # Initialize MCP server
 mcp = FastMCP("your-mcp-name")
 
@@ -15,6 +19,26 @@ async def dummy_tool(param: str) -> str:
         return "No awsome response found."
 
     return 
+
+
+@mcp.tool()
+async def sure_anlami(sure_adi: str) -> str:
+    """
+    Girilen sure adının anlamını döner.
+    Args:
+        sure_adi (str): Sure adı (ör: 'Fatiha')
+    Returns:
+        str: JSON formatında anlam veya hata
+    """
+    try:
+        result = get_sure_meaning(sure_adi)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }, ensure_ascii=False, indent=2)
 
 # Your another awsome tools can be added here
 # @mcp.tool()

@@ -1,6 +1,7 @@
 import requests
 import json
 
+
 def dummyTool(param: str) -> str:
     """
     Method description here.

@@ -49,11 +49,13 @@ def get_sure_meaning(sure_name: str) -> dict:
         }
         
         # Sayfadaki tüm linkleri ve metinleri tara
+        sure_link = None
         for a in soup.find_all("a", href=True):
             text = a.get_text(strip=True)
             if text.lower() == sure_name.lower() or text.lower() == sure_name.lower().replace(" suresi",""):
                 sure_found = True
-                sure_details["sure_linki"] = a["href"]
+                sure_link = a["href"]
+                sure_details["sure_linki"] = sure_link
                 
                 # Aynı satırdaki bilgileri al (numarası, ayet sayısı vs.)
                 parent = a.parent
@@ -76,7 +78,7 @@ def get_sure_meaning(sure_name: str) -> dict:
                         if "Mekkî" in sibling_text or "Medenî" in sibling_text:
                             sure_details["iniş_yeri"] = "Mekke" if "Mekkî" in sibling_text else "Medine"
                         if len(sibling_text) > 50:  # Uzun metin açıklama olabilir
-                            sure_details["aciklama"] = sibling_text[:200] + "..." if len(sibling_text) > 200 else sibling_text
+                            sure_details["liste_sayfasi_aciklamasi"] = sibling_text[:200] + "..." if len(sibling_text) > 200 else sibling_text
                 
                 break
         
@@ -94,6 +96,82 @@ def get_sure_meaning(sure_name: str) -> dict:
                 if sure_name.lower() in p_text.lower() and len(p_text) > 30:
                     sure_details["sayfa_aciklamasi"] = p_text
                     break
+        
+        # Şimdi sure detay sayfasından açıklama ve ayetleri al
+        if sure_link:
+            sure_url = sure_link if sure_link.startswith("http") else f"https://www.kuranokuyan.com{sure_link}"
+            try:
+                sure_resp = requests.get(sure_url, timeout=15)
+                sure_resp.raise_for_status()
+                sure_soup = BeautifulSoup(sure_resp.text, "html.parser")
+                
+                # Sure açıklamasını bul
+                sure_aciklama = None
+                
+                # Farklı class isimleri dene
+                for class_name in ["sure-aciklama", "aciklama", "sure-tanitim", "meal", "sure-meal"]:
+                    aciklama_div = sure_soup.find("div", class_=class_name)
+                    if aciklama_div:
+                        sure_aciklama = aciklama_div.get_text(strip=True)
+                        break
+                
+                # Alternatif: title altındaki ilk paragraf
+                if not sure_aciklama:
+                    title = sure_soup.find("title")
+                    if title:
+                        title_parent = title.parent
+                        if title_parent:
+                            next_p = title_parent.find_next("p")
+                            if next_p:
+                                sure_aciklama = next_p.get_text(strip=True)
+                
+                # Alternatif: h1 altındaki ilk div veya p
+                if not sure_aciklama:
+                    h1 = sure_soup.find("h1")
+                    if h1:
+                        next_element = h1.find_next(["div", "p"])
+                        if next_element and len(next_element.get_text(strip=True)) > 50:
+                            sure_aciklama = next_element.get_text(strip=True)
+                
+                if sure_aciklama:
+                    sure_details["siteden_aciklama"] = sure_aciklama
+                
+                # Ayetleri bul
+                ayetler = []
+                
+                # Ayet class'larını dene
+                for ayet_class in ["ayet", "verse", "ayah", "ayet-metin"]:
+                    ayet_divs = sure_soup.find_all("div", class_=ayet_class)
+                    if ayet_divs:
+                        for i, ayet_div in enumerate(ayet_divs[:10], 1):  # İlk 10 ayeti al
+                            ayet_text = ayet_div.get_text(strip=True)
+                            if len(ayet_text) > 10:  # Çok kısa metinleri atla
+                                ayetler.append({
+                                    "ayet_no": i,
+                                    "metin": ayet_text
+                                })
+                        break
+                
+                # Alternatif: p tag'leri içinde ayet ara
+                if not ayetler:
+                    p_tags = sure_soup.find_all("p")
+                    ayet_no = 1
+                    for p in p_tags:
+                        p_text = p.get_text(strip=True)
+                        # Ayet benzeri uzun metinleri al (en az 20 karakter)
+                        if len(p_text) > 20 and ayet_no <= 10:
+                            ayetler.append({
+                                "ayet_no": ayet_no,
+                                "metin": p_text
+                            })
+                            ayet_no += 1
+                
+                if ayetler:
+                    sure_details["ayetler"] = ayetler
+                    sure_details["gosterilen_ayet_sayisi"] = len(ayetler)
+                
+            except Exception as e:
+                sure_details["ayet_hatasi"] = f"Ayetler alınamadı: {str(e)}"
             
         result["success"] = True
         result["data"] = sure_details

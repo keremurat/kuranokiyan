@@ -1,10 +1,19 @@
 startCommand:
   type: stdio
   configSchema:
-    # JSON Schema defining the configuration options for the MCP.
     type: object
-    properties: {}
+    properties:
+      defaultSure:
+        type: string
+        title: "Varsayılan Sure"
+        description: "Agent'ın otomatik olarak sorgulayacağı sure adı (isteğe bağlı)."
+        default: "Fatiha"
+    required: []
   commandFunction:
     |-
-    (config) => ({ command: 'python', args: ['-m', 'server'] })
-  exampleConfig: {}
+    (config) => ({ command: 'python', args: ['server.py'] })
+  exampleConfig:
+    defaultSure: "Fatiha"
+description: |
+  Bu MCP agent, kullanıcıdan gelen sure adı ile ilgili soruları yanıtlar ve https://www.kuranokuyan.com/sure-listesi adresinden ilgili surenin anlamını döner.
+  Tool: sure_anlami (sure adı ile anlam döner)
